@@ -7,3 +7,6 @@ stamp-h1
 rpm/rpm.spec
 lprwrap/lprwrap
 *.1
+*.o
+psdim/psdim
+pstops-clip/pstops-clip
