@@ -1,0 +1,53 @@
+## Copyright (C) 2001-2012 Peter Selinger.
+## This file is part of the upprint package. It is free software and
+## is distributed under the terms of the GNU general public license.
+## See the file COPYING for details.
+
+# $Id: rpm.spec.in 100 2012-03-27 23:02:39Z selinger $
+
+######################################################################
+# This file is used by "rpm" to create the source and binary
+# distributions for Redhat Package Manager.
+
+Summary: Calculates optimal page layout for n-up printing
+Name: @PACKAGE@
+Version: @VERSION@
+Release: @RPMRELEASE@
+License: GNU Public License
+Group: Applications/Printing
+Source: http://www.mathstat.dal.ca/~selinger/@PACKAGE_TARNAME@/@PACKAGE_TARNAME@-@VERSION@.tar.gz
+URL: http://www.mathstat.dal.ca/~selinger/@PACKAGE_TARNAME@/
+Packager: Peter Selinger <selinger@users.sourceforge.net>
+BuildRoot: /tmp/@PACKAGE_TARNAME@-buildroot
+
+%description
+The upprint package contains client-side tools for better formatting
+of print jobs, particularly n-up printing.
+
+%prep
+rm -rf $RPM_BUILD_ROOT
+
+%setup
+
+%build
+./configure --prefix=%{_prefix} --bindir=%{_bindir} --mandir=%{_mandir} --datadir=%{_datadir}
+make
+
+%install
+make  install-strip \
+        prefix=$RPM_BUILD_ROOT/%{_prefix} \
+        bindir=$RPM_BUILD_ROOT/%{_bindir} \
+        mandir=$RPM_BUILD_ROOT/%{_mandir} \
+        datadir=$RPM_BUILD_ROOT/%{_datadir}
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(-, root, root, 0755)
+%doc AUTHORS COPYING ChangeLog NEWS README pstops-clip/LICENSE
+%{_bindir}/*
+%{_mandir}/man1/*
+
+%changelog
+

@@ -1,0 +1,1101 @@
+#!/bin/bash
+
+## Copyright (C) 2001-2012 Peter Selinger.
+## This file is part of the upprint package. It is free software and
+## is distributed under the terms of the GNU general public license.
+## See the file COPYING for details.
+
+# lprwrap --- a wrapper around the lpr command, which can handle
+# any-to-postscript conversion, options for duplex and n-up printing,
+# and printer-specific options (such as trays and papertypes).
+#
+# Author: Peter Selinger, selinger@users.sourceforge.net
+
+# The background for this script is that (a) most printing packages
+# (such as LPRng or CUPS), which presumably can handle options like
+# duplex printing, actually do a rotten job at it, and (b) in today's
+# environment, all print jobs are eventually converted to PostScript,
+# so there is no reason not to do it as part of the lpr command,
+# rather than rely on the print spooler to do it.
+
+# We also implement improved n-up printing via the psdim command; this
+# detects the actual margins of a document and shrinks it only to the
+# extent necessary, rather than shrinking everything to a standard
+# microscopic size. Note that 1-up printing is a special case and a
+# convenient way of fitting the document to the printer's paper size;
+# this might shrink the document, but not enlarge it. The default is to
+# do nothing, i.e., just pipe the document through.
+#
+# An additional feature is input filtering: this script can accept dvi, pdf,
+# plain text, and various types of compressed files, and converts them to
+# postscript automatically. The file type is determined by looking at the
+# content, rather than the name, of the file, so (unlike a2ps) it works
+# properly if the file comes from stdin.
+
+# Requirements:                     recommended version
+#  GNU bash                         2.04.21(1)-release
+#  lpr                              0.50-7 (bsd compatible)
+#  pstops-clip (or pstops)          upprint @VERSION@ (this package) or psutils 1.17
+#  file                             3.33
+#  mktemp                           1.5
+#  sed                              GNU 3.02
+#  awk                              GNU 3.1.1
+#
+# Optional:
+#  getopt (enhanced)                1.1.0
+#  psdim                            upprint @VERSION@ (this package)
+#  ghostscript (gs)                 5.50 (used by psdim and pdf2ps)
+#  mpage                            2.5.1pre2
+#  pdftops                          (comes with xpdf)
+#  pdf2ps                           (comes with ghostscript)
+#  dvips                            5.86 p1.5d
+#  gzip                             1.3
+#  bzip2                            1.0.1
+#  iconv                            2.3.2
+#
+# Some of these utilities are optional. If psdim is not present, we
+# revert to "dumb" settings for n-up printing. If getopt is not
+# present, we use "dumb" option parsing, which means the user has to
+# type something like -a -b instead of -ab. If no appropriate
+# print filters are available, we simply reject that kind of input.
+# However, postscript input (the most common case) can always be
+# handled.
+
+# How to install this script:
+#
+# 1) Get and install the required software listed above. I also
+#    recommend getting the optional software, particularly "psdim",
+#    which enables *greatly* prettier n-up printing.
+#
+# 2) Optional: adjust the configurable settings below, for example,
+#    the locations of the default configuration files, and the default
+#    "tmp" directory.
+#
+# 3) Copy this lprwrap script to some location on your PATH, for example, 
+#    /usr/bin/lprwrap. 
+# 
+# 4) Optional: if desired, create an alias, for example by putting
+#    this into your .bashrc:
+#    
+#    alias lpr='lprwrap -h'
+#
+# 5) Optional: set up a system-wide configuration file (default
+#    /etc/lprrc) or a per-user configuration file (default ~/.lprrc)
+#    with your default options. If your site prefers duplex printing,
+#    put "-od" into this file, if your site prefers A4 paper, put
+#    "-oa4", if your site uses CUPS, put "-ocups", and so on. Note
+#    that individual users can override these options.
+
+# ----------------------------------------------------------------------
+# the following settings are configurable:
+
+# "real" lpr program to use (this should be BSD compatible). If this
+# is unspecified, we use "lpr", unless "lpr" is actually a name for
+# "lprwrap", in which case we use "lpr-orig".
+#LPR=lpr
+
+# global options file
+SYST_CONFIG=/etc/lprrc
+
+# user's options file
+USER_CONFIG=.lprrc
+
+# default directory for temporary files. If the TEMPDIR environment
+# variable is set, respect it.
+TMPDIR="${TEMPDIR:-/tmp}"
+
+# end of configurable settings
+
+# ----------------------------------------------------------------------
+# setup for temporary files
+
+# ensure privacy of temporary files
+umask 077
+
+# a template for temporary filenames, containing process id to allow
+# easy cleanup
+TEMPLATE=lprwrap-$$
+
+# make a temporary file
+tmpfile () {
+    mktemp $TMPDIR/$TEMPLATE.XXXXXX
+}
+
+# clean up all temp-files on exit (even after error or SIGINT)
+cleanup () {
+    rm -f $TMPDIR/$TEMPLATE.??????
+}
+
+trap cleanup EXIT
+
+# ----------------------------------------------------------------------
+# auxiliary functions
+
+# quote: concatenate arguments, then escape special bash characters.
+quote () {
+    echo "$@" | sed 's/\\/\\\\/g;s/\"/\\\"/g;s/\$/\\\$/g;s/(/\\(/g;s/)/\\)/g;s/~/\\~/g;'s/"'"/"\\\'"/g';s/\ /\\\ /g;s/`/\\`/g;s/</\\</g;s/>/\\>/g;s/\;/\\\;/g;s/|/\\|/g;s/?/\\?/g;s/\*/\\\*/g;s/\[/\\\[/g;s/&/\\&/g;s/^$/\"\"/'
+}
+
+# concat: concatenate arguments, separate them by commas
+concat () {
+    local flag
+    flag=""
+    while [ $# -gt 0 ]; do
+	if [ -n "$1" ]; then
+	    if [ -n "$flag" ]; then
+		echo -n ","
+	    fi
+	    echo -n "$1"
+	    flag="1"
+	fi
+	shift
+    done
+}
+
+# have: output "yes" if the given program appears to be installed
+have () {
+    if which "$1" 2> /dev/null 1>&2; then
+	echo yes
+    fi
+}
+
+# ----------------------------------------------------------------------
+# check for available features
+
+# list of required and optional features:
+REQUIRED="bash file mktemp sed awk"
+OPTIONAL="getopt psdim mpage gzip bzip2 iconv dvips pdftops pdf2ps pstops-clip pstops"
+
+for i in $REQUIRED; do
+    if [ -z "`have "$i"`" ]; then
+	echo "lprwrap: Error: $i is required, but not installed" > /dev/stderr
+	exit 1
+    fi
+done
+
+for i in $OPTIONAL; do
+    j=`echo $i | sed 's/[^a-zA-Z0-9]/_/g'`
+    declare HAVE_$j=`have $i`
+done
+
+if [ "$HAVE_pstops_clip" ]; then
+    PSTOPS="pstops-clip"
+    CLIP="--clip"
+elif [ "$HAVE_pstops" ]; then
+    PSTOPS="pstops"
+    CLIP=""
+else 
+    echo "lprwrap: Error: pstops-clip or pstops is required, but not installed" > /dev/stderr
+    exit 1
+fi
+
+# ----------------------------------------------------------------------
+# part 1: read command line
+
+DEBUG_FILE=/dev/null
+LPROPTS=
+CUPS=
+FILES=
+DUPLEX=
+PAPER=
+TRAY=
+MEDIA=
+# UP=0 means no processing, UP=1 means 1-up printing (fit-to-size)
+UP=0
+BOX=
+INFO=
+BACKEND=
+FORCE=
+DUMB=
+SOLID=
+FUDGE=
+REMOVE=
+UNCOLLATED=
+NUMCOPIES=
+REPEAT=1
+
+version() {
+    echo "lprwrap @VERSION@. Copyright (C) 2001-2012 Peter Selinger."
+}
+
+usage() {
+  echo -n "\
+lprwrap @VERSION@. Enhanced lpr with options for duplex and n-up printing.
+
+Usage: lprwrap [options] [file]...
+
+Options: same options as for lpr, plus:
+  --help             print usage info and exit
+  --version          print version info and exit
+  --license          print license info and exit
+  --verbose          print some diagnostics to stderr
+  --test             send output to stdout instead of printer
+  --force            force suspicious files to be printed anyway
+  --tmpdir <dir>     choose directory for temporary files
+  --lpr <name>       program to use for the backend lpr
+  -oduplex, -od      duplex printing (with long edge binding)
+  -ohduplex, -oh     duplex printing (with short edge binding)
+  -osimplex, -os     no duplex printing (default)
+  -o<paper>          select a paper size: letter, executive, legal, a3,
+		     a4, a5, b5, tabloid, statement, folio, quarto, 10x14
+		     (default is letter)
+  -o<tray>           select a tray: upper, middle, lower, manual
+  -o2up              2-up printing
+  -o4up              4-up printing
+  -o8up              8-up printing
+  -o9up              9-up printing
+  -o16up             16-up printing
+  -odumb             faster, but uglier n-up printing (don't fit to size)
+  -ofit              fit to size in 1-up mode
+  -osolid            detect non-white background colors (slower)
+  -ofudge=[LRTB]<n>  percentage of pixels allowed out of bounds
+  -obox              print a box around each page (plain text only)
+  -oinfo             print date and user name on each page (plain text only)
+  -ouncollated       with -#, make NUM copies of each page, not of each file
+                     (may not work in duplex mode)
+  -ocups             let CUPS handle duplexing, paper and tray selection, 
+		     and collation (by default the frontend handles it)
+
+Note that -duplex and -hduplex refer to whether you turn the page on
+the long edge or on the short edge, with respect to the *input*
+page. That is, if you select -o2up, you should still select -oduplex,
+just as you would if you hadn't selected -o2up.  But if your input
+file is in landscape format, you should probably select -ohduplex.
+
+The following standard lpr options are also supported:
+
+  -P <printer>       direct output to a specific printer
+  -h                 do not print burst page
+  -m                 send mail upon completion
+  -r                 remove the file upon completion of spooling
+  -# <num>           number of copies to make of each file
+  -[1234] <font>     specify a font to be mounted on font position i
+  -C <class>         job classification to use on the burst page
+  -J <job>           job name to print on the burst page
+  -U <user>          user name to print on the burst page and for accounting.
+                     This option is only honored if the real user-id
+                     is daemon (or that specified in the printcap file
+                     instead of daemon), and is intended for those
+                     instances where print filters wish to requeue
+                     jobs.
+
+The following options are ignored for backwards compatibility:
+
+  -T <title>, -i <numcols>, -w <num>, -c, -d, -f, -g, -l, -n, -p, -t, -v, -s
+
+Command line options are also read from the two files $SYST_CONFIG and
+\$HOME/$USER_CONFIG, if they exist, and processed in that order before any
+other command line options are processed. For instance, if you like
+duplex printing to be your default, put \"-od\" into one of these files,
+or if you would like to use a private temp directory, put \"--tmpdir
+<dir>\". If your system uses CUPS, put \"-ocups\". You can also use this to 
+set the default paper size.
+"
+}
+
+license() {
+  echo -n "\
+lprwrap @VERSION@. Copyright (C) 2001-2012 Peter Selinger.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
+"
+}
+
+# read options
+dopts () {
+    while [ $# -gt 0 ]; do
+	case $1 in
+	-o )
+	    doopts $2
+	    shift 2
+	;;
+	-P )
+	    PRINTER="$2"
+	    LPROPTS="$LPROPTS -P `quote $2`"
+	    shift 2
+	;;
+	-h | -m )
+            LPROPTS="$LPROPTS `quote $1`"
+	    shift 1
+	;;
+	-r )
+	    REMOVE=1
+	    shift 1
+	;;
+	-C | -J | -T | -U | -i | -w )
+            LPROPTS="$LPROPTS `quote $1` `quote $2`"
+	    shift 2
+	;;
+	# because of a special quirk in lpr, the following options *must*
+	# pass there arguments *without* a white space to lpr.
+	-1 | -2 | -3 | -4 )
+	    LPROPTS="$LPROPTS `quote $1$2`"
+	    shift 2
+	;;
+	-# )
+	    NUMCOPIES="$2"
+	    shift 2
+	;;
+	-c | -d | -f | -g | -l | -n | -p | -t | -v | -s )
+	    echo lprwrap: Warning: option $1 ignored > /dev/stderr
+	    shift 1
+	;;
+	-T | -i | -w )
+	    echo lprwrap: Warning: option $1 ignored > /dev/stderr
+	    shift 2
+	;;
+	--help )
+	    usage
+	    exit 0
+	;;
+	--license )
+	    license
+	    exit 0
+	;;
+	--test )
+	    BACKEND=test
+	    shift 1
+	;;
+	--force )
+	    FORCE=yes
+	    shift 1
+	;;
+	--version )
+	    version
+	    exit 0
+	;;
+	--verbose )
+	    DEBUG_FILE=/dev/stderr
+	    shift 1
+	;;
+	--ppd )
+	    # ignore for backwards compatibility
+	    shift 2
+	;;
+	--tmpdir )
+	    TMPDIR="$2"
+	    shift 2
+	;;
+	--lpr )
+	    LPR="$2"
+	    shift 2
+	;;
+	-- )
+	    shift 1
+	    break
+	;;
+	-* )
+	    echo "lprwrap: invalid option: $1" > /dev/stderr
+	    echo "Try --help for more information" > /dev/stderr
+	    exit 1
+	;;
+	* )
+	    # getopt must be missing and this is a filename
+	    break
+	;;
+	esac
+    done
+
+    # done with options, now read filenames
+
+    while [ $# -gt 0 ]; do
+	FILES="$FILES `quote $1`"
+	shift
+    done
+
+    # end of dopts ()
+}
+
+# read -o options
+doopts () {
+    case "$@" in
+    d | duplex )
+	DUPLEX=DuplexNoTumble
+    ;;
+    h | hduplex )
+	DUPLEX=DuplexTumble
+    ;;
+    s | simplex )
+	DUPLEX=None
+    ;;
+    letter )
+	PAPER=Letter
+    ;;
+    executive )
+	PAPER=Executive
+    ;;
+    legal )
+	PAPER=Legal
+    ;;
+    tabloid )
+	PAPER=Tabloid
+    ;;
+    statement )
+	PAPER=Statement
+    ;;
+    folio )
+	PAPER=Folio
+    ;;
+    quarto )
+	PAPER=Quarto
+    ;;
+    10x14 )
+	PAPER=10x14
+    ;;
+    a4 )
+	PAPER=A4
+    ;;
+    a3 )
+	PAPER=A3
+    ;;
+    a5 )
+	PAPER=A5
+    ;;
+    b5 )
+	PAPER=B5
+    ;;
+    upper | tray1 )
+	TRAY=Upper
+	TRAY2=Tray1
+    ;;
+    middle | tray2 )
+	TRAY=Middle
+	TRAY2=Tray2
+    ;;
+    lower | tray3 )
+	TRAY=Lower
+	TRAY2=Tray3
+    ;;
+    manual | manualfeed )
+	TRAY=ManualFeed
+	TRAY2=Manual
+    ;;
+    fit )
+	UP=1
+    ;;
+    2up )
+	UP=2
+    ;;
+    4up )
+	UP=4
+    ;;
+    8up )
+	UP=8
+    ;;
+    9up )
+	UP=9
+    ;;
+    16up )
+	UP=16
+    ;;
+    dumb )
+	DUMB=1
+    ;;
+    solid )
+	SOLID="-C"
+    ;;
+    fudge=* )
+	FUDGE="$FUDGE -F ${@#fudge=}"
+    ;;
+    fudge )
+	echo "lprwrap: option -o$@ needs an argument" > /dev/stderr
+	echo "Try --help for more information" > /dev/stderr
+	exit 1
+    ;;
+    box )
+	BOX=1
+    ;;
+    info )
+	INFO=1
+    ;;
+    uncollated )
+	UNCOLLATED=1
+    ;;
+    cups )
+	CUPS=1
+    ;;
+    *:* )
+	# ignore for backwards compatibility
+    ;;
+    * )
+        # try to pass other options to the underlying lpr
+        LPROPTS="$LPROPTS -o$*"
+    ;;
+    * )
+	echo "lprwrap: invalid option: -o$@" > /dev/stderr
+	echo "Try --help for more information" > /dev/stderr
+	exit 1
+    ;;
+    esac
+
+    # end of doopts ()
+}
+
+# first read options from configuration files, if possible
+XOPTS="`cat $SYST_CONFIG 2>/dev/null` `cat $HOME/$USER_CONFIG 2>/dev/null`"
+
+# if getopt is available, use it to pre-process the options. If not,
+# the user has to give the options in dumb format (all options first,
+# with options and arguments separated by whitespace, followed by
+# optional '--' and filenames)
+
+OPTSTRING=o:P:#:K:C:J:T:U:i:1:2:3:4:w:cdfghlnmprstv
+LONGOPTS=help,version,license,verbose,test,force,ppd:,tmpdir:,lpr:
+
+if [ "$HAVE_getopt" ]; then
+    OPTIONS=`getopt -n lprwrap -s bash -l $LONGOPTS -o $OPTSTRING -- $XOPTS "$@"`
+    if [ $? != 0 ]; then
+	echo "Try --help for more information" > /dev/stderr
+	exit 1
+    fi
+    eval set -- "$OPTIONS"
+    dopts "$@"
+else
+    dopts $XOPTS "$@"
+fi
+
+# figure out the name of the "real" lpr program to use as a backend,
+# if not specified by the user.
+
+if [ "$LPR" = "" ]; then
+    if (lpr --version | egrep '^lprwrap ') >& /dev/null; then
+        # "lpr" is lprwrap
+	LPR=lpr-orig
+    else
+	LPR=lpr
+    fi
+fi
+
+if [ -z "`have "$LPR"`" ]; then
+    echo "lprwrap: Error: $LPR is required, but not installed" > /dev/stderr
+    exit 1
+fi
+
+# if no printer given (as option or through environment), use default
+if [ -z "$PRINTER" ]; then
+    PRINTER=lp
+fi
+
+# invert duplex mode (tumble vs. notumble) if 2up or 8up selected
+if [ "$UP" = "2" ] || [ "$UP" = "8" ]; then
+    if [ "$DUPLEX" = "DuplexTumble" ]; then
+	DUPLEX=DuplexNoTumble
+    elif [ "$DUPLEX" = "DuplexNoTumble" ]; then
+	DUPLEX=DuplexTumble
+    fi
+fi
+
+# ensure NUMCOPIES is empty or a number
+if [ "$NUMCOPIES" ]; then
+    NUMCOPIES=`expr "$NUMCOPIES" + 0 2> /dev/null || echo ""`
+fi
+
+# set up remaining LPROPTS (options to pass to lpr)
+
+# options for features() function, passed in environment variables
+if [ -z "$CUPS" ]; then
+    OPTION_duplex=`echo "$DUPLEX" | tr A-Z a-z`
+    OPTION_pagesize=`echo "$PAPER" | tr A-Z a-z`
+    OPTION_inputslot=`echo "$TRAY" | tr A-Z a-z`
+    OPTION_copies=
+
+    if [ "$NUMCOPIES" ]; then
+	if [ "$UNCOLLATED" ]; then
+	    OPTION_copies="$NUMCOPIES"
+	else
+	    REPEAT="$NUMCOPIES"
+	fi
+    fi
+fi
+
+if [ "$CUPS" ]; then
+    MEDIA=`concat "$PAPER" "$TRAY2"`
+
+    if [ "$DUPLEX" == "DuplexNoTumble" ]; then
+    # new-style and old-style options for compatibility
+	LPROPTS="$LPROPTS -o sides=two-sided-long-edge"
+	LPROPTS="$LPROPTS -o Duplex=DuplexNoTumble"
+    elif [ "$DUPLEX" == "DuplexTumble" ]; then
+	LPROPTS="$LPROPTS -o sides=two-sided-short-edge"
+	LPROPTS="$LPROPTS -o Duplex=DuplexTumble"
+    elif [ "$DUPLEX" == "None" ]; then
+	LPROPTS="$LPROPTS -o sides=one-sided"
+	LPROPTS="$LPROPTS -o Duplex=None"
+    fi
+    
+    if [ "$PAPER" ]; then
+    # old-style option for backward compatibility
+	LPROPTS="$LPROPTS -o PageSize=$PAPER"
+    fi
+    if [ "$TRAY2" ]; then
+    # old-style option for backward compatibility
+	LPROPTS="$LPROPTS -o InputSlot=$TRAY2"
+    fi
+    if [ "$MEDIA" ]; then
+    # new-style option
+	LPROPTS="$LPROPTS -o media=$MEDIA"
+    fi
+    if [ -z "$UNCOLLATED" ]; then
+	LPROPTS="$LPROPTS -o Collate=True"
+    fi
+    if [ "$NUMCOPIES" ]; then
+	# missing space after -# is essential
+	LPROPTS="$LPROPTS -#$NUMCOPIES"
+    fi
+fi
+
+# if we don't have psdim, we must use dumb nup-mode
+
+if [ -z "$HAVE_psdim" ]; then
+    DUMB=2
+fi
+
+echo LPR=$LPR                                       > $DEBUG_FILE
+echo LPROPTS=$LPROPTS                               > $DEBUG_FILE
+echo CUPS=$CUPS                                     > $DEBUG_FILE
+echo OPTION_duplex=$OPTION_duplex                   > $DEBUG_FILE
+echo OPTION_pagesize=$OPTION_pagesize               > $DEBUG_FILE
+echo OPTION_inputslot=$OPTION_inputslot             > $DEBUG_FILE
+echo OPTION_copies=$OPTION_copies                   > $DEBUG_FILE
+echo FILES=$FILES                                   > $DEBUG_FILE
+echo PRINTER=$PRINTER                               > $DEBUG_FILE
+echo DUPLEX=$DUPLEX                                 > $DEBUG_FILE
+echo UP=$UP                                         > $DEBUG_FILE
+echo BOX=$BOX                                       > $DEBUG_FILE
+echo INFO=$INFO                                     > $DEBUG_FILE
+echo PAPER=$PAPER                                   > $DEBUG_FILE
+echo TRAY=$TRAY                                     > $DEBUG_FILE
+echo TRAY2=$TRAY2                                   > $DEBUG_FILE
+echo MEDIA=$MEDIA                                   > $DEBUG_FILE
+echo BACKEND=$BACKEND                               > $DEBUG_FILE
+echo REMOVE=$REMOVE                                 > $DEBUG_FILE
+echo DUMB=$DUMB                                     > $DEBUG_FILE
+echo NUMCOPIES=$NUMCOPIES                           > $DEBUG_FILE
+echo UNCOLLATED=$UNCOLLATED                         > $DEBUG_FILE
+echo REPEAT=$REPEAT                                 > $DEBUG_FILE
+echo DEBUG_FILE=$DEBUG_FILE                         > $DEBUG_FILE
+echo -----------------                              > $DEBUG_FILE
+
+# ----------------------------------------------------------------------
+# part 2: convert input to generic postscript.
+
+# the output is fed to the command $DOWNSTREAM. This way, if there is
+# an error, we don't get a broken pipe.
+
+# the following code is inspired by rhs-printfilters (redhat)
+filter () {
+    # figure out the magic of the input file
+    # we work with temporary files, rather than rewinding a stream -
+    # it is just so much clearer that way!
+
+    local TMP=`tmpfile`
+    if [ $? != 0 ]; then
+        echo "lprwrap: Error: not create temporary file" > /dev/stderr
+        exit 1
+    fi
+    cat > $TMP
+
+    magic=$(file $TMP)
+    magic=${magic#*: }
+    case `echo $magic | tr 'A-Z' 'a-z'` in
+	*bzip2* )
+          if [ "$HAVE_bzip2" ]; then
+	    bzip2 -dc $TMP | filter
+	  else
+	    echo "lprwrap: Can't print this type of file, because bzip2 not installed:" > /dev/stderr
+	    echo "$magic" > /dev/stderr
+	  fi
+	;;
+	*packed*|*gzip*|*compress* )
+	  if [ "$HAVE_gzip" ]; then
+	    gzip -dc $TMP | filter
+	  else
+	    echo "lprwrap: Can't print this type of file, because gzip not installed:" > /dev/stderr
+	    echo "$magic" > /dev/stderr
+	  fi
+        ;;
+	postscript* )
+	    cat $TMP | $DOWNSTREAM
+    	;;
+	"tex dvi file"* )
+	  if [ "$HAVE_dvips" ]; then
+	    dvips -q $TMP -o - | $DOWNSTREAM
+	  else
+	    echo "lprwrap: Can't print this type of file, because dvips not installed:" > /dev/stderr
+	    echo "$magic" > /dev/stderr
+	  fi
+	;;
+	*pdf* )
+          if [ "$HAVE_pdftops" ]; then
+	    local TMP1=`tmpfile`
+	    pdftops $TMP $TMP1 > /dev/null
+	    cat $TMP1 | $DOWNSTREAM
+          elif [ "$HAVE_pdf2ps" ]; then
+	    local TMP1=`tmpfile`
+	    pdf2ps $TMP $TMP1 > /dev/null
+	    cat $TMP1 | $DOWNSTREAM
+	  else
+	    echo "lprwrap: Can't print this type of file, because neither pdftops nor pdf2ps is installed:" > /dev/stderr
+	    echo "$magic" > /dev/stderr
+	  fi
+	;;
+	*utf-8*unicode*text* )
+	  if [ "$HAVE_iconv" ]; then
+	    cat $TMP | iconv -c -f utf8 -t latin1 | filter
+	  else
+	    echo "lprwrap: Can't print this type of file, because iconv not installed:" > /dev/stderr
+	    echo "$magic" > /dev/stderr
+	  fi
+        ;;
+	* )
+	  # check whether it is text
+	  if echo $magic | egrep -qi ".*(latex|tex document).*"; then
+	    # prevent printing TeX and LaTeX sources, a common mistake
+	    ISTEXT=""
+	  elif echo $magic | egrep -qi ".*(ascii|text|english|script).*"; then
+	    ISTEXT="yes"
+          elif egrep -aq $'[^[:space:][:print:]]' $TMP; then
+	    ISTEXT=""
+	  else
+	    ISTEXT="yes"
+          fi
+          if [ -z "$ISTEXT" ]; then
+	    echo "lprwrap: Don't know how to print this type of file:" > /dev/stderr
+	    echo "$magic" > /dev/stderr
+	  elif [ "$HAVE_mpage" ]; then
+	    # check file size
+	    if [ -z "$FORCE" -a "`wc -c < "$TMP"`" -gt 16000 ]; then
+		echo "lprwrap: Not printing text file longer than 16000 bytes. Use --force to override." > /dev/stderr
+	    else
+		MPAGEOPTS=""
+		
+	    # we handle an interesting special case: if n-up printing
+	    # is selected for a text file, mpage does a better job at
+	    # it than pstops. So we handle it here, then reset the UP
+	    # variable to 0. This works because our downstream
+	    # function is not called until after this code is
+	    # evaluated! (However, mpage can only handle UP=1,2,4,8,
+	    # so we do the remaining cases UP=9,16 in pstops anyway)
+		
+		if [ "$UP" = "1" ] || [ "$UP" = "2" ] || [ "$UP" = "4" ] || [ "$UP" = "8" ]; then
+		    MPAGEOPTS="$MPAGEOPTS -$UP"
+		    UP=0
+		fi
+		
+		if [ -z "$BOX" ]; then
+		    MPAGEOPTS="$MPAGEOPTS -o"
+		fi
+		
+		if [ "$INFO" ]; then
+		    DATE=`date`
+		    INFOSTRING="`quote $FILENAME - printed by $USER on $DATE`"
+		    MPAGEOPTS="$MPAGEOPTS -H -h $INFOSTRING"
+		fi
+		eval set -- $MPAGEOPTS
+		MPAGEPAPER="-b$PAPER"
+		if [ "$PAPER" = "" ]; then
+		    MPAGEPAPER=""
+		fi
+		mpage -da -1 -f $MPAGEPAPER "$@" $TMP | $DOWNSTREAM
+	    fi
+	  else
+	    echo "lprwrap: Can't print this type of file, because mpage not installed:" > /dev/stderr
+	    echo "$magic" > /dev/stderr
+          fi
+	;;
+    esac
+
+    rm -f $TMP
+}
+
+# ----------------------------------------------------------------------
+# part 3: convert to n-up
+
+# find format string for pstops if we don't have psdim. This currently
+# only works for letter size paper; I didn't have the patience to
+# figure this out for other paper sizes.
+
+dumbdim () {
+    case ${UP} in
+    2 )
+	echo "2:0@0.647L(7.81in,0in)+1@0.647L(7.81in,5.5in)"
+    ;;
+    4 )
+	echo "4:0@0.5(0in,5.5in)+1@0.5(4.25in,5.5in)+2@0.5(0in,0in)+3@0.5(4.25in,0in)"
+    ;;
+    8 )
+	echo "8:0@0.3235L(3.905in,0in)+1@0.3235L(3.905in,2.75in)+2@0.3235L(3.905in,5.5in)+3@0.3235L(3.905in,8.25in)+4@0.3235L(8.155in,0in)+5@0.3235L(8.155in,2.75in)+6@0.3235L(8.155in,5.5in)+7@0.3235L(8.155in,8.25in)"
+    ;;
+    9 )
+	echo "9:0@0.33(0in,7.333in)+1@0.33(2.833in,7.333in)+2@0.33(5.667in,7.333in)+3@0.33(0in,3.667in)+4@0.33(2.833in,3.667in)+5@0.33(5.667in,3.667in)+6@0.33(0in,0in)+7@0.33(2.833in,0in)+8@0.33(5.667in,0in)"
+    ;;
+    16 )
+	echo "16:0@0.25(0in,8.25in)+1@0.25(2.125in,8.25in)+2@0.25(4.25in,8.25in)+3@0.25(6.375in,8.25in)+4@0.25(0in,5.5in)+5@0.25(2.125in,5.5in)+6@0.25(4.25in,5.5in)+7@0.25(6.375in,5.5in)+8@0.25(0in,2.75in)+9@0.25(2.125in,2.75in)+10@0.25(4.25in,2.75in)+11@0.25(6.375in,2.75in)+12@0.25(0in,0in)+13@0.25(2.125in,0in)+14@0.25(4.25in,0in)+15@0.25(6.375in,0in)"
+    ;;
+    * )
+	echo "1:0@1(0in,0in)"
+    esac
+}
+
+# do n-up formatting from stdin to stdout
+
+nup () {
+    if [ "$UP" != "0" ]; then
+	local TMP=`tmpfile`
+	if [ $? != 0 ]; then
+	    echo "lprwrap: Error: cannot create temporary file"
+	    exit 1
+	fi
+
+	cat > $TMP
+	if [ -z "$DUMB" ]; then
+	    case "$UP" in
+		2 ) SEP=.5in ;; 4 ) SEP=.35in ;; 8 ) SEP=.25in ;;
+		9 ) SEP=.24in ;; 16 ) SEP=.18in ;; *) SEP=.5in
+	    esac
+	    PSDIMPAPER="$PAPER"
+	    if [ "$PAPER" = "" ]; then
+		PSDIMPAPER="letter"
+	    fi
+	    PSDIM=`psdim $CLIP $SOLID $FUDGE -q --${UP}up -s "$SEP" -p "$PSDIMPAPER" -S "$TMP"`
+  	    # psdim will sometimes fail on strange postscript files;
+	    # in this case we use the default dimensions.
+	    if [ $? -ne 0 ]; then
+		PSDIM=`dumbdim "$TMP"`
+	    fi
+	else
+	    PSDIM=`dumbdim "$TMP"`
+	fi
+	"$PSTOPS" -q "$PSDIM" "$TMP"
+	rm -f "$TMP"
+    else
+	cat
+    fi
+}
+
+# ----------------------------------------------------------------------
+# part 4: apply printer-and-job-specific postscript conversions
+
+features() {
+    local OPTION_duplex="$1"
+    local OPTION_pagesize="$2"
+    local OPTION_inputslot="$3"
+    local OPTION_copies="$4"
+    local FEATURE=
+
+    case "$OPTION_pagesize" in
+	letter )
+	    echo "%%BeginFeature: PageSize Letter"
+	    echo "<</PageSize[612 792]/ImagingBBox null>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	    ;;
+	legal )
+	    echo "%%BeginFeature: PageSize Legal"
+	    echo "<</PageSize[612 1008]/ImagingBBox null>>setpagedevice"
+	    echo "%%EndFeature" 
+	    FEATURE=1
+	    ;;
+	executive )
+	    echo "%%BeginFeature: PageSize Executive"
+	    echo "<</PageSize[522 756]/ImagingBBox null>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	    ;;
+	a4 )
+	    echo "%%BeginFeature: PageSize A4"
+	    echo "<</PageSize[595 842]/ImagingBBox null>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	    ;;
+	a5 )
+	    echo "%%BeginFeature: PageSize A5"
+	    echo "<</PageSize[420 595]/ImagingBBox null>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	    ;;
+	b5 )
+	    echo "%%BeginFeature: PageSize B5"
+	    echo "<</PageSize[516 729]/ImagingBBox null>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	    ;;
+	envisob5 )
+	    echo "%%BeginFeature: PageSize EnvISOB5"
+	    echo "<</PageSize[499 709]/ImagingBBox null>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	;;
+	env10 )
+	    echo "%%BeginFeature: PageSize Env10"
+	    echo "<</PageSize[297 684]/ImagingBBox null>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	;;
+	envc5 )
+	    echo "%%BeginFeature: PageSize EnvC5"
+	    echo "<</PageSize[459 649]/ImagingBBox null>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	;;
+	envdl )
+	    echo "%%BeginFeature: PageSize EnvDL"
+	    echo "<</PageSize[312 624]/ImagingBBox null>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	    ;;
+	envmonarch )
+	    echo "%%BeginFeature: PageSize EnvMonarch"
+	    echo "<</PageSize[279 540]/ImagingBBox null>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	;;
+    esac
+
+    case "$OPTION_inputslot" in
+	tray1 | upper )
+	    echo "%%BeginFeature: InputSlot Tray1"
+	    echo "<</ManualFeed false /MediaPosition 3>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	;;
+	tray2 | middle )
+	    echo "%%BeginFeature: InputSlot Tray2"
+	    echo "<</ManualFeed false /MediaPosition 0>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	;;
+	tray3 | lower )
+	    echo "%%BeginFeature: InputSlot Tray3"
+	    echo "<</ManualFeed false /MediaPosition 1>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	;;
+	manual | manualfeed )
+	    echo "%%BeginFeature: InputSlot Manual"
+	    echo "<</ManualFeed true /MediaPosition 3>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	;;
+    esac
+    
+    case "$OPTION_duplex" in
+	none )
+	    echo "%%BeginFeature: Duplex None"
+	    echo "<</Duplex false>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	;;
+	duplexnotumble )
+	    echo "%%BeginFeature: Duplex DuplexNoTumble"
+	    echo "<</Duplex true/Tumble false>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	;;
+	duplextumble )
+	    echo "%%BeginFeature: Duplex DuplexTumble"
+	    echo "<</Duplex true/Tumble true>>setpagedevice"
+	    echo "%%EndFeature"
+	    FEATURE=1
+	;;
+    esac    
+    
+    if [ "$OPTION_copies" ]; then
+	    echo "%%BeginFeature: Copies $OPTION_copies"
+	    echo "/#copies $OPTION_copies def"
+	    echo "%%EndFeature"
+	    FEATURE=1
+    fi
+    
+    if [ "$FEATURE" ]; then
+	echo "% prevent print spooler from imposing its own defaults"
+	echo "/setpagedevice{pop}bind def"
+    fi
+    
+}
+
+ppd () {
+    if [ -z "$OPTION_duplex" -a -z "$OPTION_pagesize" -a -z "$OPTION_inputslot" -a -z "$OPTION_copies" ]; then
+	cat
+    else
+	local TMP=`tmpfile`
+	features "$OPTION_duplex" "$OPTION_pagesize" "$OPTION_inputslot" "$OPTION_copies" > "$TMP"
+	awk 'BEGIN { l=0 }; { print $0 }; l==0 && /^%!/ { system("cat '"$TMP"'") }; { l++ }'
+    fi
+}
+
+# ----------------------------------------------------------------------
+# part 5: send to printer, using the standard "lpr" program.
+
+# this is a dummy function for now. NOTE: Input is read from stdin, but the
+# filename is given as $FILENAME
+send () {
+    if [ "$BACKEND" = "test" ]; then
+	cat
+    elif [ "$REPEAT" = "1" ]; then
+	eval set -- $LPROPTS
+	$LPR -T "$FILENAME" -J "$FILENAME" "$@"
+    else
+	local TMP=`tmpfile`
+	cat > "$TMP"
+	eval set -- $LPROPTS
+	while [ "$REPEAT" -gt "0" ]; do
+	    $LPR -T "$FILENAME" -J "$FILENAME" "$@" < "$TMP"
+	    REPEAT=`expr "$REPEAT" - 1`
+	done
+    fi
+}
+
+# ----------------------------------------------------------------------
+# part 6: iterate through a list of files
+
+# pipe combines all the above; it takes a filename as argument, and
+# reads the input file from stdin
+
+downstream () {
+    if [ -z "$CUPS" ]; then
+	nup | ppd | send
+    else
+	nup | send
+    fi
+}
+
+pipe () {
+    DOWNSTREAM=downstream
+    filter
+}
+
+if [ -z "$FILES" ]; then
+    FILENAME="(stdin)"
+    pipe
+else
+    eval set -- $FILES
+    while [ $# -gt 0 ]; do
+	if [ ! -e "$1" ]; then
+	    echo lprwrap: $1: No such file or directory > /dev/stderr
+	elif [ -d "$1" ]; then
+	    echo lprwrap: $1: Is a directory            > /dev/stderr
+	elif [ ! -r "$1" ]; then
+	    echo lprwrap: $1: Permission denied         > /dev/stderr
+	else
+	    FILENAME="$1"
+	    cat -- "$1" | pipe
+	    if [ "$REMOVE" = "1" ]; then
+		rm "$1"
+	    fi
+	fi
+	shift
+    done
+fi

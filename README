@@ -1,0 +1,264 @@
+             UPPRINT - tools for better n-up printing
+
+                                * * *
+
+DESCRIPTION
+
+ The upprint package contains tools for better formatting of print
+ jobs. Unlike print systems such as CUPS, which delegate all
+ formatting to the print server, the upprint tools are designed to
+ work on the user side, and therefore under the user's control.
+ The package provides the following tools:
+
+ * pstops-clip: an extension of Angus J. C. Duggan's "pstops" program
+   for reformatting postscript files. The extension allows
+   configurable page clipping.
+
+ * psdim: a small utility to be used in conjunction with pstops.  It
+   determines the true margins of a postscript documents and
+   calculates the optimal page placement for n-up printing. It outputs
+   a format string suitable for processing by pstops or pstops-clip.
+   In order to accurately determine the size of the pages in a
+   postscript document, psdim internally uses the ghostscript
+   interpreter to render the document. For this reason, psdim is
+   relatively slow, but much more accurate than other tools.
+
+ * lprwrap: a wrapper around the standard "lpr" program that performs
+   client-side pre-processing of print jobs. It recognizes special
+   options for duplex printing and n-up printing, and can be used as a
+   drop-in replacement for "lpr".
+
+DEPENDENCIES
+
+ For psdim to work, ghostscript must be installed on your system.
+
+ For lprwrap to work, you need at least: bash, lpr, file, mktemp,
+ sed, and awk. For enhanced functionality, you should also have:
+ getopt, mpage, gzip, bzip2, iconv, dvips, and pdf2ps.
+
+COMPILATION AND INSTALLATION
+
+ For generic compilation instructions, see the file INSTALL. In
+ practice the following three commands to the trick:
+
+ ./configure
+ make
+ make install
+
+ The ./configure script recognizes the following non-standard options:
+   --enable-metric         use metric units (centimeters) as default
+   --enable-a4             use a4 as the default papersize
+
+CUSTOMIZATION
+
+ lprwrap is designed as a drop-in wrapper around the "lpr"
+ program. After installing lprwrap, you can create an alias, for
+ example by putting the following into your .bashrc or
+ the system-wide /etc/bash.bashrc:
+
+    alias lpr='lprwrap -h'
+
+USAGE
+
+ See the respective man pages for full usage information.
+
+ PSDIM USAGE:
+
+  Usage: psdim [options] [file]
+  
+  Options:
+   -h, --help               - print this help message and exit
+   -v, --version            - print version info and exit
+   -l, --license            - print license info and exit
+   -q, --quiet              - suppress progress info on stderr
+   -x, --width <dim>        - output page width
+   -y, --height <dim>       - output page height
+   -p, --page <format>      - select output page size (e.g. letter, a4)
+   -m, --margin <dim>       - margin around page
+   -n, --hmargin <dim>      - horizontal margin (horizontal space)
+   -o, --vmargin <dim>      - vertical margin (vertical space)
+   -s, --sep <dim>          - separation between pages
+   -t, --hsep <dim>         - horizontal separation
+   -u, --vsep <dim>         - vertical separation
+   -L, --landscape          - landscape orientation
+   -R, --seascape           - seascape orientation
+   -U, --upside-down        - upside down orientation
+   -P, --portrait           - portrait orientation
+   -f, --format <n>x<m>     - arrange pages in n rows and m columns
+   -a, --hpolicy <n>        - horizontal alignment policy
+   -b, --vpolicy <n>        - vertical alignment policy
+   -c, --columnmode         - sort pages in columns
+   -d, --righttoleft        - page numbers increase right to left
+   -e, --bottomtotop        - page numbers increase bottom to top
+   -C, --color              - handle non-white backgrounds
+   -i, --clip               - output page clipping instructions for pstops-clip
+   -F, --fudge [L|R|T|B]<n> - percentage of pixels allowed out of bounds
+   -H, --ladjust <dim>      - adjust left edge of input's bounding box
+   -I, --radjust <dim>      - adjust right edge of input's bounding box
+   -J, --tadjust <dim>      - adjust top edge of input's bounding box
+   -K, --badjust <dim>      - adjust bottom edge of input's bounding box
+   -S, --shrink             - only shrink, never enlarge page
+   -1, --1up                - fit to size mode
+   -2, --2up                - 1x2 landscape mode
+   -4, --4up                - 2x2 portrait mode
+   -8, --8up                - 2x4 landscape mode
+   -9, --9up                - 3x3 portrait mode
+   -6, --16up               - 4x4 portrait mode
+  
+  Dimensions can have optional units, e.g. 6.5in, 15cm. Default is
+  inches unless --enable-metric was configured during compilation.
+
+  Valid page formats are: a4, a3, a5, b5, letter, legal, tabloid,
+  statement, executive, folio, quarto, 10x14. Default is letter unless
+  --enable-a4 was configured during compilation.
+
+ PSTOPS-CLIP USAGE:
+
+  Usage: pstops-clip [options] <pagespecs> [infile [outfile]]
+  Options:
+   --help               - print this help message and exit
+   --version, -v        - print version info and exit
+   --license            - print license info and exit
+   -q                   - don't print page numbers to stderr
+   -b                   - prevent PostScript 'bind' operators from binding
+   -w<width>            - set page width
+   -h<height>           - set page height
+   -p<paper>            - set paper size
+   -d[linewidth]        - draw a box around each page
+  
+  Paper sizes:
+   a3, a4, a5, b5, letter, legal, tabloid, statement, executive, folio,
+   quarto, 10x14, _glibc
+  
+  Page specification:
+   <pagespecs>  = [modulo:]<spec>[,spec|+spec]...
+   <spec>       = [-]pageno[@scale][L|R|U][(xoff,yoff)][{x0,y0,x1,y1}]
+   modulo:      the number of pages in each block (1 or more; default 1)
+   spec:        the page specification for one page in each block
+   pageno:      between 0 and modulo-1
+   scale:       scaling factor
+   L,R,U:       rotate left, right, upside-down
+   xoff,yoff:   page origin in PostScript points, or units of cm, in, w, h
+   x0,y1,x1,y1: page clip path in PostScript points, or units of cm, in, w, h
+
+ LPRWRAP USAGE:
+
+  Usage: lprwrap [options] [file]...
+  
+  Options: same options as for lpr, plus:
+    --help             print usage info and exit
+    --version          print version info and exit
+    --license          print license info and exit
+    --verbose          print some diagnostics to stderr
+    --test             send output to stdout instead of printer
+    --force            force suspicious files to be printed anyway
+    --tmpdir <dir>     choose directory for temporary files
+    --lpr <name>       program to use for the backend lpr
+    -oduplex, -od      duplex printing (with long edge binding)
+    -ohduplex, -oh     duplex printing (with short edge binding)
+    -osimplex, -os     no duplex printing (default)
+    -o<paper>          select a paper size: letter, executive, legal, a3,
+                       a4, a5, b5, tabloid, statement, folio, quarto, 10x14
+                       (default is letter)
+    -o<tray>           select a tray: upper, middle, lower, manual
+    -o2up              2-up printing
+    -o4up              4-up printing
+    -o8up              8-up printing
+    -o9up              9-up printing
+    -o16up             16-up printing
+    -odumb             faster, but uglier n-up printing (don't fit to size)
+    -ofit              fit to size in 1-up mode
+    -osolid            detect non-white background colors (slower)
+    -ofudge=[LRTB]<n>  percentage of pixels allowed out of bounds
+    -obox              print a box around each page (plain text only)
+    -oinfo             print date and user name on each page (plain text only)
+    -ouncollated       with -#, make NUM copies of each page, not of each file
+                       (may not work in duplex mode)
+    -ocups             let CUPS handle duplexing, paper and tray selection, 
+                       and collation (by default the frontend handles it)
+  
+  Note that -duplex and -hduplex refer to whether you turn the page on
+  the long edge or on the short edge, with respect to the *input*
+  page. That is, if you select -o2up, you should still select -oduplex,
+  just as you would if you hadn't selected -o2up.  But if your input
+  file is in landscape format, you should probably select -ohduplex.
+  
+  The following standard lpr options are also supported:
+  
+    -P <printer>       direct output to a specific printer
+    -h                 do not print burst page
+    -m                 send mail upon completion
+    -r                 remove the file upon completion of spooling
+    -# <num>           number of copies to make of each file
+    -[1234] <font>     specify a font to be mounted on font position i
+    -C <class>         job classification to use on the burst page
+    -J <job>           job name to print on the burst page
+    -U <user>          user name to print on the burst page and for accounting.
+                       This option is only honored if the real user-id
+                       is daemon (or that specified in the printcap file
+                       instead of daemon), and is intended for those
+                       instances where print filters wish to requeue
+                       jobs.
+  
+  The following options are ignored for backwards compatibility:
+  
+    -T <title>, -i <numcols>, -w <num>, -c, -d, -f, -g, -l, -n, -p, -t, -v, -s
+  
+  Command line options are also read from the two files /etc/lprrc and
+  $HOME/.lprrc, if they exist, and processed in that order before any
+  other command line options are processed. For instance, if you like
+  duplex printing to be your default, put "-od" into one of these
+  files, or if you would like to use a private temp directory, put
+  "--tmpdir <dir>". If your system uses CUPS, put "-ocups". You can
+  also use this to set the default paper size.
+
+COPYRIGHT
+
+ For psdim and lprwrap:
+ ---------------------- 
+
+ Copyright (C) 2001-2012 Peter Selinger
+
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; either version 2 of the License, or (at
+ your option) any later version.
+
+ This program is distributed in the hope that it will be useful, but
+ WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with this program; if not, write to the Free Software
+ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307,
+ USA. See also http://www.gnu.org/.
+
+ See the file COPYING for details.
+
+ For pstops-clip:
+ ----------------
+
+ Copyright (C) 1991-1995 Angus J. C. Duggan.
+ Copyright (C) 2006-2012 Peter Selinger.
+
+ This program may be copied and used for any purpose (including
+ distribution as part of a for-profit product), provided:
+
+ 1) The original attribution of the programs is clearly displayed in
+    the product and/or documentation, even if the programs are modified
+    and/or renamed as part of the product.
+
+ 2) The original source code of the programs is provided free of
+    charge (except for reasonable distribution costs). For a
+    definition of reasonable distribution costs, see the Gnu General
+    Public License or Larry Wall's Artistic License (provided with the
+    Perl 4 kit). The GPL and Artistic License in NO WAY affect this
+    license; they are merely used as examples of the spirit in which
+    it is intended.
+
+ 3) These programs are provided "as-is". No warranty or guarantee of
+    their fitness for any particular task is provided. Use of these
+    programs is completely at your own risk.
+
+ See the file pstops-clip/LICENSE for details.

@@ -1,0 +1,205 @@
+.\" Copyright (C) 2001-2012 Peter Selinger.
+.\" This file is part of the upprint package. It is free software and
+.\" is distributed under the terms of the GNU general public license.
+.\" See the file COPYING for details.
+.\" 
+.\" $Id: lprwrap.1.in 60 2008-02-03 01:11:10Z selinger $
+.TH lprwrap 1 "@DATE@" "Version @VERSION@" ""
+.SH NAME
+lprwrap \- enhanced lpr with options for duplexing and n-up printing
+.SH SYNOPSIS
+.nf
+.B lprwrap [\fIoptions\fP] [\fIfile\fP]...
+.fi
+.SH DESCRIPTION
+\fBlprwrap\fP is a wrapper around the standard \fBlpr\fP program that
+performs client-side pre-processing of print jobs. It recognizes
+special options for duplex printing and n-up printing, and can be used
+as a drop-in replacement for a BSD compatible \fBlpr\fP.  
+.SH OPTIONS
+.SS Options specific to \fBlprwrap\fP:
+.TP 11
+.B    --help             
+Print usage information and exit.
+.TP
+.B    --version
+Print version information and exit.
+.TP
+.B    --verbose
+Print some diagnostics to stderr.
+.TP
+.B    --test             
+Send output to stdout instead of printer.
+.TP
+.B    --force
+Force printing of long text files. Usually the size of text files is
+limited to 16000 characters, to prevent paper waste from non-text
+files accidentally printed as text. This option lifts this limit.
+.TP
+.B    --tmpdir \fIdir\fP
+Set directory for temporary files.
+.TP
+.B    --lpr \fIname\fP
+Program to use for the backend \fBlpr\fP. Default: \fBlpr\fP. An
+exception is when \fBlpr\fP is a name for the \fBlprwrap\fP script
+itself (for example, a symbolic link); in this case, we use
+\fBlpr-orig\fP as the default name of the backend.
+.TP
+.B    -oduplex, -od      
+Duplex printing (with long edge binding).  Note that \fB-oduplex\fP
+and \fB-ohduplex\fP refer to whether you turn the page on the long
+edge or on the short edge, with respect to the \fIinput\fP page. That
+is, if you select \fB-o2up\fP, you should still select \fB-oduplex\fP,
+just as you would if you hadn\(cqt selected \fB-o2up\fP.  But if your
+input file is in landscape format, you should probably select
+\fB-ohduplex\fP.
+.TP
+.B    -ohduplex, -oh     
+Duplex printing (with short edge binding). See also \fB-oduplex\fP.
+.TP
+.B    -osimplex, -os     
+No duplex printing (default).
+.TP
+.B    -o\fIpaper\fP
+Select a paper size: letter, executive, legal, a3, a4, a5, b5,
+tabloid, statement, folio, quarto, 10x14.  (default is @DEFAULT_FORMAT@).
+.TP
+.B    -o\fItray\fP
+Select a tray: upper, middle, lower, manual.
+.TP
+.B    -o2up              
+2-up printing.
+.TP
+.B    -o4up              
+4-up printing.
+.TP
+.B    -o8up              
+8-up printing.
+.TP
+.B    -o9up              
+9-up printing.
+.TP
+.B    -o16up             
+16-up printing.
+.TP
+.B    -odumb             
+Faster, but uglier n-up printing (don\(cqt fit to size).
+.TP
+.B    -osolid
+Handle non-white background colors. Normally, when calculating the
+bounding box of a document, \fBlprwrap\fP assumes that the background
+(i.e., the margins) are white. With the -osolid option, solidly
+colored backgrounds are handled correctly, at the expense of much
+slower execution. Patterned backgrounds are not currently supported.
+.TP
+.B -ofudge=\fR[\fIL\fP|\fIR\fP|\fIT\fP|\fIB\fP]\fP\fIn\fP
+Set the percentage of pixels that are allowed out of bounds. The
+default is 0. When calculating the bounding box of a document, a small
+amount of text or pixels protruding into the margins can mess up the
+computation. The \fB-ofudge\fP option makes the bounding box slightly
+smaller by allowing a percentage of the pixels to be outside the
+bounding box. This threshold can be set separately for the left (L),
+right (R), top (T), and bottom (B) margins. 
+
+Note that \fB-ofudge=20\fP is equivalent to \fB-ofudge=LRTB20\fP. This
+means 20 percent of the pixels are allowed to be in \fIeach\fP of the left,
+right, top, and bottom margins. Therefore up to 80 (and not 20)
+percent of the pixels can be outside the bounding box.
+.TP
+.B    -ofit              
+Fit to size in 1-up mode.
+.TP
+.B    -obox
+Print a box around each page (plain text only).
+.TP
+.B    -oinfo
+Print date and user name on each page (plain text only).
+.TP
+.B    -ouncollated       
+With -#, make \fInum\fP copies of each page, not of each file.
+.TP
+.B    -ocups
+Let CUPS handle duplexing, paper and tray selection, and collation.
+The (preferable) default behavior is to handle these features in the
+frontend and encode them as PostScript instructions. There is no need
+to use this option unless your version of CUPS (probably an older
+version) is having trouble with handling the above features; in this
+case, specifying \fB-ocups\fP option might solve the problem.
+.PD
+.SS Standard \fBlpr\fP options:
+The following standard \fBlpr\fP options are also supported:  
+.TP 11
+.B    -P \fIprinter\fP         
+Direct output to a specific printer.
+.TP
+.B    -h                 
+Do not print burst page.
+.TP
+.B    -m                 
+Send mail upon completion.
+.TP
+.B    -r                 
+Remove the file upon completion of spooling.
+.TP
+.B    -# \fInum\fP
+Number of copies to make of each file.
+.TP
+.B    -[1234] \fIfont\fP       
+Specify a font to be mounted on font position 1\-4.
+.TP
+.B    -C \fIclass\fP           
+Job classification to use on the burst page.
+.TP
+.B    -J \fIjob\fP
+Job name to print on the burst page.
+.TP
+.B    -U \fIuser\fP            
+
+User name to print on the burst page and for accounting.  This option
+is only honored if the real user-id is \fBdaemon\fP (or that specified
+in the printcap file instead of \fBdaemon\fP), and is intended for
+those instances where print filters wish to requeue jobs.
+.PD
+.SS Ignored options:
+The following options are ignored for backwards compatibility:
+  
+.B    -T \fItitle\fP, -i \fInumcols\fP, -w \fInum\fP, -c, -d, -f, -g, -l, -n, -p, -t, -v, -s.
+
+.SH CONFIGURATION
+
+Command line options are also read from the two files \fI/etc/lprrc\fP
+and \fI$HOME/.lprrc\fP, if they exist, and processed in that order
+before any other command line options are processed. For instance, if
+you like duplex printing to be your default, put \(dq\fB\-od\fP\(dq
+into one of these files, or if you would like to use a private temp
+directory, put \(dq\fB--tmpdir\fP \fItmpdir\fP\(dq. You can also use this
+to set the default paper size.
+
+.SH EXIT STATUS
+On successful completion, 0 is returned, otherwise a positive error number.
+.SH VERSION
+@VERSION@
+.SH AUTHOR
+
+Peter Selinger <selinger at users.sourceforge.net>
+.SH COPYRIGHT
+
+Copyright (C) 2001-2012 Peter Selinger.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307,
+USA. See also http://www.gnu.org/.
+.SH SEE ALSO
+\fBpstops\fP(1), \fBpstops-clip\fP(1), \fBgs\fP(1), \fBpsdim\fP(1)
+

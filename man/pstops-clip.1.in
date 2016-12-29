@@ -1,0 +1,179 @@
+.\" Copyright (C) 2001-2012 Peter Selinger.
+.\" This file is part of the upprint package. It is free software and
+.\" is distributed under the terms of the GNU general public license.
+.\" See the file COPYING for details.
+.\" 
+.TH PSTOPS-CLIP 1 "@DATE@" "Version @VERSION@" ""
+.SH NAME
+pstops-clip \- shuffle pages in a PostScript file
+.SH SYNOPSIS
+.B pstops-clip
+[
+.I options
+] 
+.I pagespecs
+[
+.I infile
+[
+.I outfile
+] ]
+.SH DESCRIPTION
+.I Pstops-clip
+rearranges pages from a PostScript document, creating a new PostScript file.
+The input PostScript file should follow the Adobe Document Structuring
+Conventions.
+.I Pstops-clip
+can be used to perform a large number of arbitrary re-arrangements of
+Documents, including arranging for printing 2-up, 4-up, booklets, reversing,
+selecting front or back sides of documents, scaling, etc. It is derived
+from Angus J. C. Duggan\'s
+.I pstops
+program, with the added ability of specifying a clippath for each page. 
+.PP
+.I pagespecs
+follow the syntax:
+.RS 5
+.TP 10
+.I pagespecs
+= [\fImodulo\fP:]\fIspec\fP[+\fIspec\fP|,\fIspec\fP]...
+.TP
+.I spec
+= [-]\fIpageno\fP[L|R|U][@\fIscale\fP][(\fIxoff\fP,\fIyoff\fP)][{\fIx0\fP,\fIy0\fP,\fIx1\fP,\fIy1\fP}]
+.PD
+.RE
+.sp
+.TP 10
+.I modulo
+is the number of pages in each block. The value of
+.I modulo
+should be greater than 0; the default value is 1.
+.TP
+.I spec
+is the page specification for one page in each block. 
+If page \fIspec\fPs are separated by
+.B \+
+the pages will be merged into one page; if they are separated by
+.B ,
+they will be on separate pages.
+.TP
+.I pageno
+This value specifies the relative page number within a block, and
+should be between 0 (for the first page in the block) and \fImodulo\fP-1
+(for the last page in each block) inclusive.
+If the optional minus sign is specified, the page is relative to the end of
+the document, instead of the start.
+If there is only one page specification, with
+.I pageno
+zero, the \fIpageno\fP may be omitted.
+.TP
+.I scale
+This optional parameter scales the page by the fraction specified.
+.TP
+\fIL\fP, \fIR\fP, \fIU\fP
+These optional parameters rotate the page left,
+right, or upside-down.
+.TP
+\fIxoff\fP, \fIyoff\fP
+These optional dimensions shift the page by the specified amount.
+They are in PostScript's points, but may be followed by the units
+.B "cm"
+or
+.B "in"
+to convert to centimetres or inches, or the flag
+.B "w"
+or
+.B "h"
+to specify as a multiple of the width or height.
+.TP
+\fIx0\fP, \fIy0\fP, \fIx1\fP, \fIy1\fP
+These optional dimensions are used to specify a custom clipping path for
+the page. 
+.PD
+.PP
+The shift, rotation, and scaling are performed
+in that order regardless of which order
+they appear on the command line.
+.SH OPTIONS
+The following options are supported:
+.TP 11
+.B --help
+Print usage information and exit.
+.TP
+.B --version, -v
+Print version information and exit.
+.TP
+.B --license
+Print license information and exit.
+.TP
+\fB\-w\fP\fIwidth\fP
+Set the width which is used by the
+.B "w"
+dimension specifier. These dimensions are also used (after scaling) to set the
+clipping path for each page.
+.TP
+\fB\-h\fP\fIheight\fP
+Set the height which is used by the
+.B "h"
+dimension specifier. These dimensions are also used (after scaling) to set the
+clipping path for each page.
+.TP
+\fB\-p\fP\fIpaper\fP
+An alternative to \fB\-w\fP and \fB\-h\fP. Set the paper size to
+.B a3, a4, a5, b5, letter, legal, tabloid, statement, executive, folio, quarto
+or
+.B 10x14.
+The default paper size is
+.B @DEFAULT_FORMAT@.
+.TP
+.B \-b
+Prevent any
+.B bind
+operators in the PostScript prolog from binding. This may be needed in cases
+where complex multi-page re-arrangements are being done.
+.TP
+\fB\-d\fP[\fIlinewidth\fP]
+Draw a line around the border of each page, of the specified width.
+If the \fIlinewidth\fP parameter is omitted, a default linewidth of 1 point is
+assumed. The linewidth is relative to the original page dimensions,
+\fIi.e.\fP it is scaled up or down with the rest of the page.
+.TP
+.B \-q
+Pstops-clip normally prints the page numbers of the pages re-arranged; the
+.I \-q
+option suppresses this.
+.PD
+.SH EXAMPLES
+This section contains some sample re-arrangements. To put two pages on one
+sheet (of A4 paper), the pagespec to use is:
+.sp
+.ce
+2:0L@.7(21cm,0)+1L@.7(21cm,14.85cm)
+.sp
+To select all of the odd pages in reverse order, use:
+.sp
+.ce
+2:-0
+.sp
+To re-arrange pages for printing 2-up booklets, use
+.sp
+.ce
+4:-3L@.7(21cm,0)+0L@.7(21cm,14.85cm)
+.sp
+for the front sides, and
+.sp
+.ce
+4:1L@.7(21cm,0)+-2L@.7(21cm,14.85cm)
+.sp
+for the reverse sides (or join them with a comma for duplex printing).
+.SH AUTHORS
+Copyright (C) Angus J. C. Duggan 1991-1995
+.br
+Copyright (C) Peter Selinger 2006-2012
+.SH "SEE ALSO"
+\fBpsdim\fP(1), \fBlprwrap\fP(1)
+.SH TRADEMARKS
+.B PostScript
+is a trademark of Adobe Systems Incorporated.
+.SH BUGS
+.I Pstops-clip
+does not accept all DSC comments.

@@ -1,0 +1,254 @@
+.\" Copyright (C) 2001-2012 Peter Selinger.
+.\" This file is part of the upprint package. It is free software and
+.\" is distributed under the terms of the GNU general public license.
+.\" See the file COPYING for details.
+.\" 
+.\" $Id: psdim.1.in 100 2012-03-27 23:02:39Z selinger $
+.TH @PSDIM@ 1 "@DATE@" "Version @VERSION@" ""
+.SH NAME
+@PSDIM@ \- calculate optimal page format for n-up printing from a
+postscript file 
+.SH SYNOPSIS
+.B @PSDIM@ [\fIoptions\fP] [\fIfilename\fP]
+.SH DESCRIPTION
+\fB@PSDIM@\fP is a small utility to be used in conjunction with
+\fBpstops\fP.  It looks at the contents of a postscript document to
+determine the size of the printed pages. From this, it
+calculates the optimal placement of the pages for n-up printing. It
+outputs a format string suitable for processing by \fBpstops\fP.
+
+In order to determine the size of the pages in a postscript document
+accurately, \fB@PSDIM@\fP uses the ghostscript interpreter to render
+the document. For this reason, \fB@PSDIM@\fP is relatively slow, but
+yields very accurate results that could not be obtained by just
+naively looking at the postscript headers. For \fB@PSDIM@\fP to work,
+\fBgs\fP must be installed on your system.
+.SH OPTIONS
+The following options are supported:
+.TP 11
+.B -h, --help
+Print usage information and exit.
+.TP
+.B -v, --version
+Print version information and exit.
+.TP
+.B -l, --license
+Print license information and exit.
+.TP
+.B -q, --quiet
+Suppress printing progress information. Normally, \fB@PSDIM@\fP prints
+page numbers to stderr for each page processed.
+.TP
+.B -x, --width \fIdim\fP
+Specify the physical width of the output paper. 
+.TP
+.B -y, --height \fIdim\fP
+Specify the physical height of the output paper.
+.TP
+.B -p, --page \fIformat\fP
+Specify the format of the output paper: one of a4, a3, a5, b5, letter,
+legal, tabloid, statement, executive, folio, quarto, 10x14. The
+default is @DEFAULT_FORMAT@. Paper formats are case insensitive. The \fB-p\fP
+option is equivalent to a corresponding pair or \fB-x\fP and \fB-y\fP
+options.
+.TP
+.B -m, --margin \fIdim\fP
+Set the width of the margins between the document and the edge of the
+paper.  The default is 0.5in.
+.TP
+.B -n, --hmargin \fIdim\fP
+Like \fB-m\fP, but only set the horizontal (left and right) margins.
+.TP
+.B -o, --vmargin \fIdim\fP
+Like \fB-m\fP, but only set the vertical (top and bottom) margins.
+.TP
+.B -s, --sep \fIdim\fP
+Set the width of the white space separating input pages when they are
+combined on a single output page.  The default is 0.5in.
+.TP
+.B -t, --hsep \fIdim\fP
+Like \fB-s\fP, but only set the space in the horizontal direction.
+.TP
+.B -u, --vsep \fIdim\fP
+Like \fB-s\fP, but only set the space in the vertical direction.
+.TP
+.B -L, --landscape
+Select the landscape orientation (pages are rotated to the left). This
+is the default for 2-up and 8-up printing. Note that the printed text
+is rotated, not the physical page.
+.TP
+.B -R, --seascape
+Select the seascape orientation (pages are rotated to the right). Note
+that the printed text is rotated, not the physical paper.
+.TP
+.B -U, --upside-down
+Select the upside-down orientation.
+.TP
+.B -P, --portrait
+Select the portrait (upright) orientation. This is the default for
+4-up, 9-up, and 16-up printing.
+.TP
+.B -f, --format \fIn\fPx\fIm\fP
+Arrange pages in \fIn\fP rows and \fIm\fP columns. 
+.TP
+.B -a, --hpolicy \fIn\fP
+Select the horizontal alignment policy. For n=0, the horizontal
+alignment of pages follows a rigid grid. For n=1, the pages in each
+column are aligned, but each column is centered in its available
+horizontal space. For n=2, each page is centered horizontally in its
+column. n=3,4 behave like n=1,2, except the width of the columns is
+variable.
+.TP
+.B -b, --vpolicy \fIn\fP
+Select the vertical alignment policy. For n=0, the vertical
+alignment of pages follows a rigid grid. For n=1, the pages in each
+row are aligned, but each row is centered in its available vertical
+space. For n=2, each page is centered vertically in its row. n=3,4
+behave like n=1,2, except the height of the rows is variable.
+.TP
+.B -c, --columnmode
+Arrange the pages in columns (default is in rows). For instance, in
+4-up printing, pages 1 and 2 will normally appear above pages 3 and
+4. If \fB-c\fP is selected, pages 1 and 2 will appear to the left of
+pages 3 and 4. 
+.TP
+.B -d, --righttoleft
+Arrange the pages with page numbers increasing from right to left
+(default is from left to right).
+.TP
+.B -e, --bottomtotop
+Arrange the pages with page numbers increasing from bottom to top
+(default is from top to bottom).
+.TP
+.B -C, --color
+Handle colored backgrounds. This option must be given when the
+document uses a background color other than white. Color processing is
+significantly slower than black-and-white processing, and should only
+be used when necessary. Note: while \fB@PSDIM@\fP will calculate the
+correct document dimensions, \fBpstops\fP is very bad at cropping
+colored backgrounds and will probably do a bad job with such documents.
+.TP
+.B -i, --clip
+Output page clipping instructions. Some PostScript documents specify
+an opaque background color, instead of leaving the background
+transparent.  This happens particularly with scanned documents. In
+this case, pstops often overwrites all or part of one page in 2-up
+mode.  The \fB--clip\fP option solves this problem by outputting
+additional page clipping instructions that can be understood by
+pstops-clip.
+.TP
+.B -F, --fudge \fR[\fIL\fP|\fIR\fP|\fIT\fP|\fIB\fP]\fP\fIn\fP
+Set the percentage of pixels that are allowed out of bounds. The
+default is 0. When calculating the bounding box of a document, a small
+amount of text or pixels protruding into the margins can mess up the
+computation. The \fB--fudge\fP option makes the bounding box slightly
+smaller by allowing a percentage of the pixels to be outside the
+bounding box. This threshold can be set separately for the left (L),
+right (R), top (T), and bottom (B) margins. 
+
+Note that \fB--fudge=20\fP is equivalent to \fB--fudge=LRTB20\fP. This
+means 20 percent of the pixels are allowed to be in \fIeach\fP of the left,
+right, top, and bottom margins. Therefore up to 80 (and not 20)
+percent of the pixels can be outside the bounding box.
+.TP
+.B -H, --ladjust \fIdim\fP
+.TP
+.B -I, --radjust \fIdim\fP
+.TP
+.B -J, --tadjust \fIdim\fP
+.TP
+.B -K, --badjust \fIdim\fP
+Shrink the input document\'s bounding box by moving the respective
+edge (left, right, top, bottom) by an additional amount towards the
+center of the page.  This adjustment is applied after any
+fudging. Sometimes it is difficult to find the correct fudge
+percentage, and it is easier to just look at the document and specify
+an absolute dimension. A negative argument causes the bounding box to
+be enlarged instead of shrunk.
+
+.TP
+.B -S, --shrink
+Only shrink, never enlarge page.
+.TP
+.B -1, --1up
+Fit to size. Equivalent to \fB-f1x1 --portrait\fP.
+.TP
+.B -2, --2up
+Equivalent to \fB-f1x2 --landscape\fP.
+.TP
+.B -4, --4up
+Equivalent to \fB-f2x2 --portrait\fP.
+.TP
+.B -8, --8up
+Equivalent to \fB-f2x4 --landscape\fP.
+.TP
+.B -9, --9up
+Equivalent to \fB-f3x3 --portrait\fP.
+.TP
+.B -6, --16up
+Equivalent to \fB-f4x4 --portrait\fP.
+.PD
+.SH OPERANDS
+If a filename is given, then a postscript document is read from that
+file. Otherwise, a postscript document is read from standard input.
+.SH DIMENSIONS
+Several command line options take a dimension argument. Dimensions can
+carry one of the optional units "in", "cm", "mm", or "pt". Here, 1pt
+is a postscript point, or 1/72 inches. The default unit is "@DEFAULT_UNIT@".
+.SH ALIGNMENT POLICIES
+In n-up printing, several input pages are rearranged into rows and
+columns on a single output page. If all the input pages are of equal
+width, height, and margins, then it is a straightforward task to
+arrange them in a grid. However, if the input pages are of variable
+width, height, and/or margins, then several choices arise regarding
+their optimal placement. These choices are governed by the horizontal
+and vertical \fIalignment policies\fP, which are specified by the
+\fB-a\fP and \fB-b\fP options. The horizontal alignment policy affects
+only the x-coordinates of the pages in the output, and the vertical
+policy affects only the y-coordinates.
+.SH EXAMPLES
+In the simplest case, \fB@PSDIM@\fP can be used to figure out an
+optimal format string for 2-up printing:
+.IP
+.nf
+> @PSDIM@ --2up test.ps
+[1] [2] [3] [4] [5] [6] [7] [8] [9] [10]
+2:0@0.93L(9.79in,-1.13in)+1@0.93L(9.79in,4.09in)
+.fi
+.LP
+The resulting format string can be fed directly to \fBpstops\fP:
+.IP
+.nf
+> pstops `@PSDIM@ --2up test.ps` test.ps test.2up.ps
+[1] [2] [3] [4] [5] [6] [7] [8] [9] [10]
+[1] [2] [3] [4] [5]
+Wrote 5 pages, 155746 bytes
+.fi
+.LP
+.SH EXIT STATUS
+On successful completion, 0 is returned, otherwise a positive error number.
+.SH VERSION
+@VERSION@
+.SH AUTHOR
+
+Peter Selinger <selinger at users.sourceforge.net>
+.SH COPYRIGHT
+
+Copyright (C) 2001-2012 Peter Selinger.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307,
+USA. See also http://www.gnu.org/.
+.SH SEE ALSO
+\fBpstops\fP(1), \fBpstops-clip\fP(1), \fBgs\fP(1), \fBlprwrap\fP(1)
