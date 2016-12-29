@@ -189,6 +189,14 @@ else
     exit 1
 fi
 
+if [ "$HAVE_getopt" ] ; then
+    # check for enhanced version of getopt
+    if getopt -T > /dev/null ; then
+	# old version, disabling
+	HAVE_getopt=""
+    fi
+fi
+
 # ----------------------------------------------------------------------
 # part 1: read command line
 
